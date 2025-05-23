@@ -1,3 +1,5 @@
+![Weather App Screenshot](screenshot.png)
+
 # Tokyo Weather API  
 Real-time weather data for Tokyo.  
 
@@ -5,3 +7,5 @@ Real-time weather data for Tokyo.
 ```bash
 pip install -r requirements.txt
 uvicorn Tokyo_Rainfall_API:app --reload
+
+
