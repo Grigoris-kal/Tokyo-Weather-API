@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, FileResponse  # Added FileResponse
+from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
@@ -30,16 +30,38 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 app.mount("/static", StaticFiles(directory="static_images"), name="static")
 
 def get_rainfall_data():
-    tokyo_time = datetime.now(pytz.timezone("Asia/Tokyo"))
+    url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
+    response = requests.get(url)
+    data = response.json()
+
+    tokyo_tz = pytz.timezone("Asia/Tokyo")
+    now = datetime.now(tokyo_tz)  # Make sure 'now' is in Tokyo time
+
+    rainfall_forecast = []
+    current_rainfall = 0.0
+
+    for item in data['list']:
+        # Convert forecast time to UTC, then to Tokyo time
+        dt_utc = datetime.strptime(item['dt_txt'], "%Y-%m-%d %H:%M:%S")
+        dt_utc = pytz.utc.localize(dt_utc)
+        dt_tokyo = dt_utc.astimezone(tokyo_tz)
+        if dt_tokyo > now:
+            rainfall = item.get('rain', {}).get('3h', 0.0)
+            if rainfall > 0:  # Only include forecasts with rainfall > 0 mm
+                rainfall_forecast.append({
+                    "timestamp": dt_tokyo.strftime('%Y-%m-%d %H:%M:%S JST%z'),
+                    "rainfall_3h_mm": rainfall
+                })
+
+    # Get current rainfall from the most recent item (could also be calculated differently)
+    if data['list']:
+        last_rain = data['list'][0].get('rain', {}).get('3h', 0.0)
+        current_rainfall = last_rain
+
     return {
-        "current_rainfall_last_hour_mm": 0.0,
-        "current_timestamp": tokyo_time.strftime('%Y-%m-%d %H:%M:%S JST%z'),
-        "forecast": [
-            {"timestamp": "2025-05-16 15:00:00 JST+0900", "rainfall_3h_mm": 1.92},
-            {"timestamp": "2025-05-16 18:00:00 JST+0900", "rainfall_3h_mm": 13.72},
-            {"timestamp": "2025-05-16 21:00:00 JST+0900", "rainfall_3h_mm": 20.33},
-            {"timestamp": "2025-05-18 03:00:00 JST+0900", "rainfall_3h_mm": 0.23}
-        ]
+        "current_rainfall_last_hour_mm": current_rainfall,
+        "current_timestamp": now.strftime('%Y-%m-%d %H:%M:%S JST%z'),
+        "forecast": rainfall_forecast[:4]  # Limit to next 4 entries for your table
     }
 
 def get_current_weather():
@@ -175,7 +197,7 @@ def rainfall_formatted(request: Request):
                     margin: 0 auto;
                 }}
                 .card {{
-                    background: rgba(0, 0, 0, 0.4);
+                    background: rgba(0, 0, 0, 0.7);
                     backdrop-filter: blur(5px);
                     border-radius: 15px;
                     padding: 25px;
