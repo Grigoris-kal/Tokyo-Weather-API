@@ -167,7 +167,7 @@ def get_sun_moon_data():
             "moon": "🌑"
         }
 
-@app.get("/rainfall/formatted", response_class=HTMLResponse)
+@app.api_route("/rainfall/formatted", response_class=HTMLResponse, methods=["GET", "HEAD"])
 def rainfall_formatted(request: Request):
     rainfall_data = get_rainfall_data()
     weather = get_current_weather()
