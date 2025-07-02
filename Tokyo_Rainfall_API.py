@@ -458,10 +458,6 @@ def rainfall_formatted(request: Request):
         </head>
         <body>
             <div class="container">
-                <!-- Cache Status Info -->
-                <div class="cache-info">
-                    🔄 Data caching enabled • Status: {get_cache_status()} • Updates every hour to save resources
-                </div>
                 
                 <!-- Current Weather Card -->
                 <div class="card">
