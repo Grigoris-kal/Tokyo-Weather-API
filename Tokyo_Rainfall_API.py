@@ -12,13 +12,25 @@ import requests
 from pathlib import Path
 
 # Load environment variables
-dotenv_path = Path(__file__).parent / "Tokyo_Rainfall.env"
-load_dotenv(dotenv_path=dotenv_path)
+# Try to load from local file first, but don't fail if it doesn't exist (for Render deployment)
+try:
+    dotenv_path = Path(__file__).parent / "Tokyo_Rainfall.env"
+    load_dotenv(dotenv_path=dotenv_path)
+except:
+    pass  # On Render, env vars are set through dashboard
 
 # Configuration
 LAT = os.getenv("LAT", "35.6895")
 LON = os.getenv("LON", "139.6917")
 API_KEY = os.getenv("OPENWEATHER_API_KEY")
+
+# Debug: Print environment variables (without showing the full API key)
+print(f"🔧 Environment check:")
+print(f"   LAT = {LAT}")
+print(f"   LON = {LON}")
+print(f"   API_KEY = {'✅ Set' if API_KEY else '❌ Missing'}")
+if API_KEY:
+    print(f"   API_KEY starts with: {API_KEY[:8]}...")
 
 # Initialize FastAPI
 app = FastAPI()
@@ -319,10 +331,23 @@ def rainfall_formatted(request: Request):
                 .download-btn:hover {{
                     background: rgba(0, 120, 240, 0.9);
                 }}
+                .cache-info {{
+                    background: rgba(0, 150, 0, 0.3);
+                    padding: 10px;
+                    border-radius: 8px;
+                    margin-bottom: 10px;
+                    text-align: center;
+                    font-size: 0.9em;
+                }}
             </style>
         </head>
         <body>
             <div class="container">
+                <!-- Note: Caching will be added back gradually -->
+                <div class="cache-info">
+                    🔄 Live data (caching temporarily disabled for debugging)
+                </div>
+                
                 <!-- Current Weather Card -->
                 <div class="card">
                     <div class="weather-header">
@@ -493,7 +518,6 @@ def rainfall_formatted(request: Request):
     """
     return HTMLResponse(content=html_content)
 
-# NEW DOWNLOAD ENDPOINT (ADD THIS EXACTLY AS IS)
 @app.get("/download")
 def download_api():
     """Download the API source code"""
