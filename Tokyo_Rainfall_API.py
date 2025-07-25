@@ -42,12 +42,13 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # Serve static files
 app.mount("/static", StaticFiles(directory="static_images"), name="static")
 
-# CACHING SYSTEM
+# IMPROVED CACHING SYSTEM
 WEATHER_CACHE = {
     'data': None,
-    'timestamp': 0
+    'timestamp': 0,
+    'in_progress': False  # Prevent duplicate requests
 }
-CACHE_DURATION = 3600  # 1 hour in seconds
+CACHE_DURATION = 7200  # 2 hours in seconds (longer cache)
 
 def is_cache_valid():
     """Check if cache is still valid"""
@@ -78,116 +79,98 @@ def root():
 def health_check():
     return {"status": "healthy", "api_key_loaded": bool(API_KEY)}
 
-# Root route - redirect to main weather page
-@app.get("/")
-def root():
-    return {"message": "Tokyo Weather API", "main_page": "/rainfall/formatted"}
-
-# Health check route
-@app.get("/health")
-def health_check():
-    return {"status": "healthy", "api_key_loaded": bool(API_KEY)}
-
-def get_rainfall_data():
+def get_all_weather_data():
+    """Consolidated function that makes only 3 API calls instead of 5+"""
+    
     # Check cache first
-    if is_cache_valid() and 'rainfall_data' in WEATHER_CACHE['data']:
-        print("📋 Using cached rainfall data")
-        return WEATHER_CACHE['data']['rainfall_data']
+    if is_cache_valid() and WEATHER_CACHE['data'] is not None:
+        print("📋 Using cached weather data")
+        return WEATHER_CACHE['data']
     
-    print("🔄 Fetching fresh rainfall data")
-    url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
-    response = requests.get(url)
-    data = response.json()
-
-    tokyo_tz = pytz.timezone("Asia/Tokyo")
-    now = datetime.now(tokyo_tz)
-
-    rainfall_forecast = []
-    current_rainfall = 0.0
-
-    for item in data['list']:
-        dt_utc = datetime.strptime(item['dt_txt'], "%Y-%m-%d %H:%M:%S")
-        dt_utc = pytz.utc.localize(dt_utc)
-        dt_tokyo = dt_utc.astimezone(tokyo_tz)
-        if dt_tokyo > now:
-            rainfall = item.get('rain', {}).get('3h', 0.0)
-            if rainfall > 0:
-                rainfall_forecast.append({
-                    "timestamp": dt_tokyo.strftime('%Y-%m-%d %H:%M:%S JST%z'),
-                    "rainfall_3h_mm": rainfall
-                })
-
-    if data['list']:
-        last_rain = data['list'][0].get('rain', {}).get('3h', 0.0)
-        current_rainfall = last_rain
-
-    result = {
-        "current_rainfall_last_hour_mm": current_rainfall,
-        "current_timestamp": now.strftime('%Y-%m-%d %H:%M:%S JST%z'),
-        "forecast": rainfall_forecast[:4]
-    }
+    # Prevent duplicate requests if one is already in progress
+    if WEATHER_CACHE['in_progress']:
+        print("⏳ Request in progress, waiting for cache...")
+        # Return existing data if available, even if expired
+        if WEATHER_CACHE['data'] is not None:
+            return WEATHER_CACHE['data']
     
-    # Update cache
-    if WEATHER_CACHE['data'] is None:
-        WEATHER_CACHE['data'] = {}
-    WEATHER_CACHE['data']['rainfall_data'] = result
-    WEATHER_CACHE['timestamp'] = time.time()
+    WEATHER_CACHE['in_progress'] = True
+    print("🔄 Fetching fresh weather data (consolidated)")
     
-    return result
-
-def get_current_weather():
-    # Check cache first
-    if is_cache_valid() and 'current_weather' in WEATHER_CACHE['data']:
-        print("📋 Using cached current weather")
-        return WEATHER_CACHE['data']['current_weather']
-        
-    print("🔄 Fetching fresh current weather")
     try:
-        url = f"https://api.openweathermap.org/data/2.5/weather?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
-        response = requests.get(url)
-        data = response.json()
-        result = {
-            "temp": data["main"]["temp"],
-            "humidity": data["main"]["humidity"],
-            "wind_speed": data["wind"]["speed"],
-            "wind_deg": data["wind"].get("deg", 0),
-            "weather": data["weather"][0]["main"],
-            "description": data["weather"][0]["description"].capitalize(),
-            "icon": data["weather"][0]["icon"]
+        tokyo_tz = pytz.timezone("Asia/Tokyo")
+        now = datetime.now(tokyo_tz)
+        
+        # API Call 1: Current Weather (also has sunrise/sunset)
+        print("🌐 API Call 1/3: Current weather")
+        current_url = f"https://api.openweathermap.org/data/2.5/weather?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
+        current_response = requests.get(current_url)
+        current_data = current_response.json()
+        
+        # API Call 2: 5-day Forecast (also has rainfall data)
+        print("🌐 API Call 2/3: 5-day forecast")
+        forecast_url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
+        forecast_response = requests.get(forecast_url)
+        forecast_data = forecast_response.json()
+        
+        # API Call 3: Air Quality
+        print("🌐 API Call 3/3: Air quality")
+        air_url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={LAT}&lon={LON}&appid={API_KEY}"
+        air_response = requests.get(air_url)
+        air_data = air_response.json()
+        
+        # Process Current Weather
+        current_weather = {
+            "temp": current_data["main"]["temp"],
+            "humidity": current_data["main"]["humidity"],
+            "wind_speed": current_data["wind"]["speed"],
+            "wind_deg": current_data["wind"].get("deg", 0),
+            "weather": current_data["weather"][0]["main"],
+            "description": current_data["weather"][0]["description"].capitalize(),
+            "icon": current_data["weather"][0]["icon"]
         }
         
-        # Update cache
-        if WEATHER_CACHE['data'] is None:
-            WEATHER_CACHE['data'] = {}
-        WEATHER_CACHE['data']['current_weather'] = result
-        WEATHER_CACHE['timestamp'] = time.time()
+        # Process Sun/Moon Data (from current weather API)
+        sunrise = datetime.fromtimestamp(current_data["sys"]["sunrise"], tz=pytz.utc).astimezone(tokyo_tz)
+        sunset = datetime.fromtimestamp(current_data["sys"]["sunset"], tz=pytz.utc).astimezone(tokyo_tz)
+        moon_phases = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"]
+        moon_phase = moon_phases[sunset.day % 8]
         
-        return result
-    except Exception:
-        return {
-            "temp": "N/A",
-            "humidity": "N/A",
-            "wind_speed": "N/A",
-            "wind_deg": 0,
-            "weather": "Unknown",
-            "description": "Weather unavailable",
-            "icon": "01d"
+        sun_moon = {
+            "sunrise": sunrise.strftime("%H:%M"),
+            "sunset": sunset.strftime("%H:%M"),
+            "moon": moon_phase
         }
-
-def get_5day_forecast():
-    # Check cache first
-    if is_cache_valid() and 'forecast' in WEATHER_CACHE['data']:
-        print("📋 Using cached 5-day forecast")
-        return WEATHER_CACHE['data']['forecast']
         
-    print("🔄 Fetching fresh 5-day forecast")
-    try:
-        url = f"https://api.openweathermap.org/data/2.5/forecast?lat={LAT}&lon={LON}&appid={API_KEY}&units=metric"
-        response = requests.get(url)
-        data = response.json()
+        # Process Rainfall Data (from forecast API)
+        rainfall_forecast = []
+        current_rainfall = 0.0
         
+        for item in forecast_data['list']:
+            dt_utc = datetime.strptime(item['dt_txt'], "%Y-%m-%d %H:%M:%S")
+            dt_utc = pytz.utc.localize(dt_utc)
+            dt_tokyo = dt_utc.astimezone(tokyo_tz)
+            if dt_tokyo > now:
+                rainfall = item.get('rain', {}).get('3h', 0.0)
+                if rainfall > 0:
+                    rainfall_forecast.append({
+                        "timestamp": dt_tokyo.strftime('%Y-%m-%d %H:%M:%S JST%z'),
+                        "rainfall_3h_mm": rainfall
+                    })
+        
+        if forecast_data['list']:
+            last_rain = forecast_data['list'][0].get('rain', {}).get('3h', 0.0)
+            current_rainfall = last_rain
+        
+        rainfall_data = {
+            "current_rainfall_last_hour_mm": current_rainfall,
+            "current_timestamp": now.strftime('%Y-%m-%d %H:%M:%S JST%z'),
+            "forecast": rainfall_forecast[:4]
+        }
+        
+        # Process 5-day Forecast (from forecast API)
         daily_data = {}
-        for item in data['list']:
+        for item in forecast_data['list']:
             date = item['dt_txt'].split()[0]
             if date not in daily_data:
                 daily_data[date] = {
@@ -197,30 +180,10 @@ def get_5day_forecast():
                     "date": datetime.strptime(date, "%Y-%m-%d").strftime("%a, %b %d")
                 }
         
-        result = list(daily_data.values())[:5]
+        forecast = list(daily_data.values())[:5]
         
-        # Update cache
-        if WEATHER_CACHE['data'] is None:
-            WEATHER_CACHE['data'] = {}
-        WEATHER_CACHE['data']['forecast'] = result
-        WEATHER_CACHE['timestamp'] = time.time()
-        
-        return result
-    except Exception:
-        return []
-
-def get_air_quality():
-    # Check cache first
-    if is_cache_valid() and 'air_quality' in WEATHER_CACHE['data']:
-        print("📋 Using cached air quality")
-        return WEATHER_CACHE['data']['air_quality']
-        
-    print("🔄 Fetching fresh air quality")
-    try:
-        url = f"https://api.openweathermap.org/data/2.5/air_pollution?lat={LAT}&lon={LON}&appid={API_KEY}"
-        response = requests.get(url)
-        data = response.json()
-        aqi = data['list'][0]['main']['aqi']
+        # Process Air Quality
+        aqi = air_data['list'][0]['main']['aqi']
         levels = {
             1: ("Good", "Air quality is satisfactory.", "#4CAF50"),
             2: ("Fair", "Moderate quality.", "#8BC34A"),
@@ -228,79 +191,68 @@ def get_air_quality():
             4: ("Poor", "Unhealthy for some.", "#FF9800"),
             5: ("Very Poor", "Health alert.", "#F44336")
         }
-        result = {
+        air_quality = {
             "aqi": aqi,
             "level": levels.get(aqi, ("Unknown", "No data", "#9E9E9E"))[0],
             "advice": levels.get(aqi, ("Unknown", "No data", "#9E9E9E"))[1],
             "color": levels.get(aqi, ("Unknown", "No data", "#9E9E9E"))[2],
-            "components": data['list'][0]['components']
+            "components": air_data['list'][0]['components']
+        }
+        
+        # Consolidate all data
+        all_data = {
+            'current_weather': current_weather,
+            'sun_moon': sun_moon,
+            'rainfall_data': rainfall_data,
+            'forecast': forecast,
+            'air_quality': air_quality
         }
         
         # Update cache
-        if WEATHER_CACHE['data'] is None:
-            WEATHER_CACHE['data'] = {}
-        WEATHER_CACHE['data']['air_quality'] = result
+        WEATHER_CACHE['data'] = all_data
         WEATHER_CACHE['timestamp'] = time.time()
+        WEATHER_CACHE['in_progress'] = False
         
-        return result
-    except Exception:
+        print("✅ All weather data cached successfully")
+        return all_data
+        
+    except Exception as e:
+        print(f"❌ Error fetching weather data: {e}")
+        WEATHER_CACHE['in_progress'] = False
+        
+        # Return fallback data
         return {
-            "aqi": 0,
-            "level": "Unknown",
-            "advice": "No air quality data",
-            "color": "#9E9E9E",
-            "components": {}
+            'current_weather': {
+                "temp": "N/A", "humidity": "N/A", "wind_speed": "N/A", 
+                "wind_deg": 0, "weather": "Unknown", "description": "Weather unavailable", "icon": "01d"
+            },
+            'sun_moon': {"sunrise": "N/A", "sunset": "N/A", "moon": "🌑"},
+            'rainfall_data': {
+                "current_rainfall_last_hour_mm": 0.0,
+                "current_timestamp": datetime.now(pytz.timezone("Asia/Tokyo")).strftime('%Y-%m-%d %H:%M:%S JST%z'),
+                "forecast": []
+            },
+            'forecast': [],
+            'air_quality': {
+                "aqi": 0, "level": "Unknown", "advice": "No air quality data", 
+                "color": "#9E9E9E", "components": {}
+            }
         }
 
 def wind_direction(degrees):
     directions = ["↓ N", "↙ NE", "← E", "↖ SE", "↑ S", "↗ SW", "→ W", "↘ NW"]
     return directions[round((degrees % 360) / 45) % 8]
 
-def get_sun_moon_data():
-    # Check cache first
-    if is_cache_valid() and 'sun_moon' in WEATHER_CACHE['data']:
-        print("📋 Using cached sun/moon data")
-        return WEATHER_CACHE['data']['sun_moon']
-        
-    print("🔄 Fetching fresh sun/moon data")
-    try:
-        url = f"https://api.openweathermap.org/data/2.5/weather?lat={LAT}&lon={LON}&appid={API_KEY}"
-        data = requests.get(url).json()
-        
-        tz = pytz.timezone("Asia/Tokyo")
-        sunrise = datetime.fromtimestamp(data["sys"]["sunrise"], tz=pytz.utc).astimezone(tz)
-        sunset = datetime.fromtimestamp(data["sys"]["sunset"], tz=pytz.utc).astimezone(tz)
-        
-        moon_phases = ["🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"]
-        moon_phase = moon_phases[sunset.day % 8]
-        
-        result = {
-            "sunrise": sunrise.strftime("%H:%M"),
-            "sunset": sunset.strftime("%H:%M"),
-            "moon": moon_phase
-        }
-        
-        # Update cache
-        if WEATHER_CACHE['data'] is None:
-            WEATHER_CACHE['data'] = {}
-        WEATHER_CACHE['data']['sun_moon'] = result
-        WEATHER_CACHE['timestamp'] = time.time()
-        
-        return result
-    except Exception:
-        return {
-            "sunrise": "N/A",
-            "sunset": "N/A",
-            "moon": "🌑"
-        }
-
 @app.api_route("/rainfall/formatted", response_class=HTMLResponse, methods=["GET", "HEAD"])
 def rainfall_formatted(request: Request):
-    rainfall_data = get_rainfall_data()
-    weather = get_current_weather()
-    forecast = get_5day_forecast()
-    air_quality = get_air_quality()
-    sun_moon = get_sun_moon_data()
+    # Get all data with just 3 API calls instead of 5+
+    all_data = get_all_weather_data()
+    
+    rainfall_data = all_data['rainfall_data']
+    weather = all_data['current_weather']
+    forecast = all_data['forecast']
+    air_quality = all_data['air_quality']
+    sun_moon = all_data['sun_moon']
     wind_dir = wind_direction(weather["wind_deg"])
     
     html_content = f"""
@@ -454,10 +406,24 @@ def rainfall_formatted(request: Request):
                     text-align: center;
                     font-size: 0.9em;
                 }}
+                .optimization-banner {{
+                    background: rgba(0, 200, 0, 0.8);
+                    color: white;
+                    padding: 10px;
+                    text-align: center;
+                    border-radius: 8px;
+                    margin-bottom: 20px;
+                    font-weight: bold;
+                }}
             </style>
         </head>
         <body>
             <div class="container">
+                
+                <!-- Optimization Status -->
+                <div class="optimization-banner">
+                    🚀 OPTIMIZED: Using only 3 API calls instead of 5+ | Cache: {get_cache_status()}
+                </div>
                 
                 <!-- Current Weather Card -->
                 <div class="card">
