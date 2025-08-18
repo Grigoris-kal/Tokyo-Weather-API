@@ -48,7 +48,7 @@ WEATHER_CACHE = {
     'timestamp': 0,
     'in_progress': False  # Prevent duplicate requests
 }
-CACHE_DURATION = 7200  # 2 hours in seconds (longer cache)
+CACHE_DURATION = 21600  # 6 hours in seconds (longer cache)
 
 def is_cache_valid():
     """Check if cache is still valid"""
@@ -607,3 +607,4 @@ def download_api():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
