@@ -420,9 +420,7 @@ def rainfall_formatted(request: Request):
         <body>
             <div class="container">
                 
-                <!-- Optimization Status -->
-                <div class="optimization-banner">
-                    🚀 OPTIMIZED: Using only 3 API calls instead of 5+ | Cache: {get_cache_status()}
+               
                 </div>
                 
                 <!-- Current Weather Card -->
@@ -607,4 +605,5 @@ def download_api():
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="127.0.0.1", port=8000)
+
 
