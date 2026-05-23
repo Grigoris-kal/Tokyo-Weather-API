@@ -24,11 +24,12 @@ If you visit the dashboard, it instantly displays five key pieces of information
 ---
 
 ## 📸 App Preview (What It Looks Like)
+<img width="1344" height="644" alt="image" src="https://github.com/user-attachments/assets/c214989f-81d2-444e-9ead-1e457e3b47c3" />
 
 ### The Main Dashboard
 https://tokyo-weather-api.vercel.app/rainfall/formatted
 
-### The Live Precipitation Radar
+### The Live Precipitation Map
 
 <img width="1292" height="527" alt="image" src="https://github.com/user-attachments/assets/24082305-3938-47ba-b22c-27584645189e" />
 
