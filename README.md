@@ -1,5 +1,4 @@
-Tokyo Weather API  
-Markdown
+# # Tokyo Weather API  
 # 🗼 Tokyo Weather & Rainfall Monitoring App
 
 Welcome! This is a simple, lightweight web application and data tool that gives you a complete, up-to-the-minute look at the weather, air quality, and rainfall in Tokyo, Japan. 
